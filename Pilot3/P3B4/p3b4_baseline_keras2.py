@@ -3,7 +3,8 @@ from __future__ import print_function
 import numpy as np
 import os, sys, gzip
 import time
-import keras
+import tensorflow.keras as keras
+#import keras
 
 from tf_mthcan import hcan
 

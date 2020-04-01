@@ -1,6 +1,11 @@
 import os
 import numpy as np
-import tensorflow as tf
+
+#import tensorflow as tf
+import tensorflow as tf2
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 import sys
 import time
 from sklearn.metrics import f1_score
@@ -47,13 +52,16 @@ class hcan(object):
                       dtype=tf.float32, trainable=self.embed_train),doc_input_reshape)
         word_embeds = tf.nn.dropout(word_embeds,self.dropout)  # batch*sents x words x attention_size
 
+        xavier_initializer = tf2.initializers.GlorotUniform()
+        #xavier_initializer = tf.contrib.layers.xavier_initializer()
+
         #word self attention
         Q = tf.layers.conv1d(word_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
         K = tf.layers.conv1d(word_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
         V = tf.layers.conv1d(word_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
 
         outputs = tf.matmul(Q,tf.transpose(K,[0, 2, 1]))
         outputs = outputs/(K.get_shape().as_list()[-1]**0.5)
@@ -78,11 +86,11 @@ class hcan(object):
 
         #sent self attention
         Q = tf.layers.conv1d(sent_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
         K = tf.layers.conv1d(sent_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
         V = tf.layers.conv1d(sent_embeds,self.attention_size,1,padding='same',
-            activation=self.activation,kernel_initializer=tf.contrib.layers.xavier_initializer())
+            activation=self.activation,kernel_initializer=xavier_initializer)
 
         outputs = tf.matmul(Q,tf.transpose(K,[0, 2, 1]))
         outputs = outputs/(K.get_shape().as_list()[-1]**0.5)
@@ -108,7 +116,7 @@ class hcan(object):
         self.predictions = []
         for i in range(self.num_tasks):
             logit = tf.layers.dense(doc_embeds,num_classes[i],
-                    kernel_initializer=tf.contrib.layers.xavier_initializer())
+                    kernel_initializer=xavier_initializer)
             logits.append(logit)
             self.predictions.append(tf.nn.softmax(logit))
 
