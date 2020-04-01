@@ -200,8 +200,9 @@ def run(GP):
     print ('\nData Format:\n[Frames (%s), Molecules (%s), Beads (%s), %s (%s)]' % (
         num_samples, num_molecules, num_beads, feature_vector, num_features))
 
-    strategy = tensorflow.distribute.OneDeviceStrategy(device="/gpu:0")
-#    strategy = tensorflow.distribute.MirroredStrategy()
+#    strategy = tensorflow.distribute.OneDeviceStrategy(device="/gpu:0")
+    strategy = tensorflow.distribute.MirroredStrategy()
+#    strategy = tensorflow.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1", "/gpu:2"])
     with strategy.scope():
 ### Define Model, Solver and Compile ##########
         print ('\nDefine the model and compile')
