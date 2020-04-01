@@ -5,7 +5,12 @@ from datetime import datetime
 
 import numpy as np
 import requests
-from keras.callbacks import Callback
+
+import tensorflow
+if tensorflow.__version__ < '2.0.0':
+    from keras.callbacks import Callback
+else:
+    from tensorflow.keras.callbacks import Callback
 
 
 def compute_trainable_params(model):

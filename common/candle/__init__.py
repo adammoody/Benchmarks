@@ -70,7 +70,25 @@ from P1_utils import combat_batch_effect_removal
 
 # import benchmark-dependent utils
 import sys
-if 'keras' in sys.modules:
+if 'tensorflow.keras' in sys.modules:
+    print ('Importing candle utils for tensorflow.keras')
+    #import from keras_utils
+    #from keras_utils import dense
+    #from keras_utils import add_dense
+    from keras_utils import build_initializer
+    from keras_utils import build_optimizer
+    from keras_utils import get_function
+    from keras_utils import set_seed
+    from keras_utils import set_parallelism_threads
+    from keras_utils import PermanentDropout
+    from keras_utils import register_permanent_dropout
+    from keras_utils import LoggingCallback
+
+    from solr_keras import CandleRemoteMonitor
+    from solr_keras import compute_trainable_params
+    from solr_keras import TerminateOnTimeOut
+
+elif 'keras' in sys.modules:
     print ('Importing candle utils for keras')
     #import from keras_utils
     #from keras_utils import dense
