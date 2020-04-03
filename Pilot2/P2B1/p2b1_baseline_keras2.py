@@ -20,15 +20,19 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 lib_path2 = os.path.abspath(os.path.join(file_path, '..','..', 'common'))
 sys.path.append(lib_path2)
 
-#from keras import backend as K
 import tensorflow
-from tensorflow import keras
-from tensorflow.keras import backend as K
+if tensorflow.__version__ < '2.0.0':
+    print("TensorFlow 1")
+    from keras import backend as K
+else:
+    print("TensorFlow 2")
+    from tensorflow.keras import backend as K
 
 import p2b1 
 import candle
 
 import p2b1_AE_models as AE_models
+import helper
 
 HOME = os.environ['HOME']
 
@@ -44,21 +48,17 @@ def str2bool(v):
 
 
 def initialize_parameters(default_model = 'p2b1_default_model.txt'):
-
     # Build benchmark object
     p2b1Bmk = p2b1.BenchmarkP2B1(p2b1.file_path, default_model, 'keras',
     prog='p2b1_baseline', desc='Train Molecular Frame Autoencoder - Pilot 2 Benchmark 1')
 
     # Initialize parameters
     GP = candle.finalize_parameters(p2b1Bmk)
-    #p2b1.logger.info('Params: {}'.format(gParameters))
 
     print ('\nTraining parameters:')
     for key in sorted(GP):
         print ("\t%s: %s" % (key, GP[key]))
         
-    # print json.dumps(GP, indent=4, skipkeys=True, sort_keys=True)
-
     if GP['backend'] != 'theano' and GP['backend'] != 'tensorflow':
         sys.exit('Invalid backend selected: %s' % GP['backend'])
 
@@ -79,8 +79,67 @@ def initialize_parameters(default_model = 'p2b1_default_model.txt'):
     return GP
 
 
-def run(GP):
+### Define Model, Solver and Compile ##########
+def compile_model(GP, bead_kernel_size, molecular_input_dim, mol_kernel_size):
+    print ('\nMolecular AE input/output dimension: ', molecular_input_dim)
 
+    print ('\nDefine the model and compile')
+    learning_rate = GP['learning_rate']
+    kerasDefaults = candle.keras_default_config()
+    opt = candle.build_optimizer(GP['optimizer'], learning_rate, kerasDefaults)
+
+    model_type = 'mlp'
+    memo = '%s_%s' % (GP['base_memo'], model_type)
+
+    molecular_nonlinearity = GP['molecular_nonlinearity']
+
+    molecular_hidden_layers = GP['molecular_num_hidden']
+
+    conv_bool = GP['conv_bool']
+    full_conv_bool = GP['full_conv_bool']
+    if conv_bool:
+        molecular_model, molecular_encoder = AE_models.conv_dense_mol_auto(
+            bead_k_size=bead_kernel_size,
+            mol_k_size=mol_kernel_size,
+            weights_path=None,
+            input_shape=(1, molecular_input_dim, 1),
+            nonlinearity=molecular_nonlinearity,
+            hidden_layers=molecular_hidden_layers,
+            l2_reg=GP['l2_reg'],
+            drop=float(GP['drop_prob']))
+    elif full_conv_bool:
+        molecular_model, molecular_encoder = AE_models.full_conv_mol_auto(
+            bead_k_size=bead_kernel_size,
+            mol_k_size=mol_kernel_size,
+            weights_path=None,
+            input_shape=(1, molecular_input_dim, 1),
+            nonlinearity=molecular_nonlinearity,
+            hidden_layers=molecular_hidden_layers,
+            l2_reg=GP['l2_reg'],
+            drop=float(GP['drop_prob']))
+    else:
+        molecular_model, molecular_encoder = AE_models.dense_auto(
+            weights_path=None,
+            input_shape=(molecular_input_dim,),
+            nonlinearity=molecular_nonlinearity,
+            hidden_layers=molecular_hidden_layers,
+            l2_reg=GP['l2_reg'],
+            drop=float(GP['drop_prob']))
+
+    if GP['loss'] == 'mse':
+        loss_func = 'mse'
+    elif GP['loss'] == 'custom':
+        loss_func = helper.combined_loss
+
+    molecular_model.compile(optimizer=opt, loss=loss_func, metrics=['mean_squared_error', 'mean_absolute_error'])
+
+    print ('\nModel Summary: \n')
+    molecular_model.summary()
+
+    return molecular_model, molecular_encoder
+
+
+def run(GP):
     # set the seed
     if GP['seed']:
         np.random.seed(GP['seed'])
@@ -112,26 +171,17 @@ def run(GP):
     #reload(p2ck.optimizers)
     maps = hf.autoencoder_preprocess()
 
-    from tensorflow.keras.optimizers import SGD, RMSprop, Adam
-    from tensorflow.keras.datasets import mnist
-    from tensorflow.keras.callbacks import LearningRateScheduler, ModelCheckpoint
-    from tensorflow.keras import callbacks
-    from tensorflow.keras.layers import ELU
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
-    #from keras.optimizers import SGD, RMSprop, Adam
-    #from keras.datasets import mnist
-    #from keras.callbacks import LearningRateScheduler, ModelCheckpoint
-    #from keras import callbacks
-    #from keras.layers.advanced_activations import ELU
-    #from keras.preprocessing.image import ImageDataGenerator
+    if tensorflow.__version__ < '2.0.0':
+        from keras.callbacks import LearningRateScheduler
+        from keras import callbacks
+    else:
+        from tensorflow.keras.callbacks import LearningRateScheduler
+        from tensorflow.keras import callbacks
 
 #    GP=hf.ReadConfig(opts.config_file)
     batch_size = GP['batch_size']
-    learning_rate = GP['learning_rate']
-    kerasDefaults = candle.keras_default_config()
 
 ##### Read Data ########
-    import helper
     (data_files, fields)=p2b1.get_list_of_data_files(GP)
     # Read from local directoy
     #(data_files, fields) = helper.get_local_files('/p/gscratchr/brainusr/datasets/cancer/pilot2/3k_run16_10us.35fs-DPPC.20-DIPC.60-CHOL.20.dir/')
@@ -143,10 +193,8 @@ def run(GP):
     # get data dimension ##
     num_samples = 0
     for f in data_files:
-
         # Seperate different arrays from the data
         (X, nbrs, resnums) = helper.get_data_arrays(f)
-
         num_samples += X.shape[0]
 
     (X, nbrs, resnums) = helper.get_data_arrays(data_files[0])
@@ -189,67 +237,21 @@ def run(GP):
 
     num_features = num_loc_features + num_type_features + num_beads
     dim = np.prod([num_beads, num_features, molecular_nbrs+1])
-    bead_kernel_size = num_features
-    molecular_input_dim = dim
-    mol_kernel_size = num_beads
 
     feature_vector = loc_feat_vect + type_feat_vect + list(fields.keys())[8:]
-
-    print ('\nMolecular AE input/output dimension: ', molecular_input_dim)
 
     print ('\nData Format:\n[Frames (%s), Molecules (%s), Beads (%s), %s (%s)]' % (
         num_samples, num_molecules, num_beads, feature_vector, num_features))
 
-#    strategy = tensorflow.distribute.OneDeviceStrategy(device="/gpu:0")
-    strategy = tensorflow.distribute.MirroredStrategy()
-#    strategy = tensorflow.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1", "/gpu:2"])
-    with strategy.scope():
-### Define Model, Solver and Compile ##########
-        print ('\nDefine the model and compile')
-        opt = candle.build_optimizer(GP['optimizer'], learning_rate, kerasDefaults)
-        model_type = 'mlp'
-        memo = '%s_%s' % (GP['base_memo'], model_type)
+    if tensorflow.__version__ < '2.0.0':
+        molecular_model, molecular_encoder = compile_model(GP, num_features, dim, num_beads)
+    else:
+        strategy = tensorflow.distribute.OneDeviceStrategy(device="/gpu:0")
+        #strategy = tensorflow.distribute.MirroredStrategy()
+        #strategy = tensorflow.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1", "/gpu:2"])
+        with strategy.scope():
+            molecular_model, molecular_encoder = compile_model(GP, num_features, dim, num_beads)
 
-######## Define Molecular Model, Solver and Compile #########
-        molecular_nonlinearity = GP['molecular_nonlinearity']
-    
-        len_molecular_hidden_layers = len(molecular_hidden_layers)
-        conv_bool = GP['conv_bool']
-        full_conv_bool = GP['full_conv_bool']
-        if conv_bool:
-            molecular_model, molecular_encoder = AE_models.conv_dense_mol_auto(bead_k_size=bead_kernel_size,
-                                                                               mol_k_size=mol_kernel_size,
-                                                                               weights_path=None,
-                                                                               input_shape=(1, molecular_input_dim, 1),
-                                                                               nonlinearity=molecular_nonlinearity,
-                                                                               hidden_layers=molecular_hidden_layers,
-                                                                               l2_reg=GP['l2_reg'],
-                                                                               drop=float(GP['drop_prob']))
-        elif full_conv_bool:
-            molecular_model, molecular_encoder = AE_models.full_conv_mol_auto(bead_k_size=bead_kernel_size,
-                                                                              mol_k_size=mol_kernel_size,
-                                                                              weights_path=None,
-                                                                              input_shape=(1, molecular_input_dim, 1),
-                                                                              nonlinearity=molecular_nonlinearity,
-                                                                              hidden_layers=molecular_hidden_layers,
-                                                                              l2_reg=GP['l2_reg'],
-                                                                              drop=float(GP['drop_prob']))
-    
-        else:
-            molecular_model, molecular_encoder = AE_models.dense_auto(weights_path=None, input_shape=(molecular_input_dim,),
-                                                                      nonlinearity=molecular_nonlinearity,
-                                                                      hidden_layers=molecular_hidden_layers,
-                                                                      l2_reg=GP['l2_reg'],
-                                                                      drop=float(GP['drop_prob']))
-    
-        if GP['loss'] == 'mse':
-            loss_func = 'mse'
-        elif GP['loss'] == 'custom':
-            loss_func = helper.combined_loss
-    
-        molecular_model.compile(optimizer=opt, loss=loss_func, metrics=['mean_squared_error', 'mean_absolute_error'])
-        print ('\nModel Summary: \n')
-        molecular_model.summary()
     ##### set up callbacks and cooling for the molecular_model ##########
     drop = 0.5
     mb_epochs = GP['epochs']
@@ -275,7 +277,7 @@ def run(GP):
     if GP['save_path'] != None:
         save_path = GP['save_path']
         if not os.path.exists(save_path):
-                os.makedirs(save_path)
+            os.makedirs(save_path)
     else:
         save_path = '.'
 
@@ -291,6 +293,9 @@ def run(GP):
 
 #### Train the Model
     if GP['train_bool']:
+        conv_bool = GP['conv_bool']
+        full_conv_bool = GP['full_conv_bool']
+        len_molecular_hidden_layers = len(molecular_hidden_layers)
         ct = hf.Candle_Molecular_Train(molecular_model, molecular_encoder, data_files, mb_epochs, callbacks,
                                        batch_size=batch_size, nbr_type=GP['nbr_type'], save_path=GP['save_path'],
                                        len_molecular_hidden_layers=len_molecular_hidden_layers,
@@ -307,7 +312,6 @@ def run(GP):
     return frame_loss, frame_mse
 
 def main():
-
     gParameters = initialize_parameters()
     run(gParameters)
 

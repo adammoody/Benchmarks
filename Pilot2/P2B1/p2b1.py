@@ -12,13 +12,24 @@ from __future__ import print_function
 # from tqdm import *
 
 import numpy as np
-#import keras.backend as K
-import tensorflow.keras.backend as K
 import threading
 import os
 import sys
 import glob
-from importlib import reload
+
+try:
+    reload  # Python 2.7
+except NameError:
+    try:
+        from importlib import reload  # Python 3.4+
+    except ImportError:
+        from imp import reload  # Python 3.0 - 3.3
+
+import tensorflow
+if tensorflow.__version__ < '2.0.0':
+    import keras.backend as K
+else:
+    import tensorflow.keras.backend as K
 
 file_path = os.path.dirname(os.path.realpath(__file__))
 lib_path2 = os.path.abspath(os.path.join(file_path, '..', '..', 'common'))
